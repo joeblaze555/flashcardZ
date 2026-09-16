@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2048 2048">
+  <!-- Splash master. Canvas: 2048x2048, export 1:1 to assets/splash.png.
+       Full-bleed #0F172A matches the splash backgroundColor so the artwork
+       blends seamlessly; expo-splash-screen centers it (resizeMode contain). -->
+  <defs>
+    <linearGradient id="cardFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1E293B"/>
+      <stop offset="1" stop-color="#0B1220"/>
+    </linearGradient>
+    <linearGradient id="boltFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#34D399"/>
+      <stop offset="1" stop-color="#10B981"/>
+    </linearGradient>
+    <filter id="emeraldGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="30" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="2048" height="2048" fill="#0F172A"/>
+
+  <g transform="translate(1024 830) scale(1.35) translate(-512 -512)">
+    <rect x="232" y="322" width="560" height="380" rx="56"
+          fill="url(#cardFill)" stroke="#10B981" stroke-width="22"
+          filter="url(#emeraldGlow)"/>
+    <rect x="300" y="392" width="280" height="22" rx="11" fill="#F8FAFC" opacity="0.85"/>
+    <rect x="300" y="432" width="180" height="22" rx="11" fill="#94A3B8" opacity="0.55"/>
+    <path d="M580 476 L452 610 L518 610 L482 668 L594 536 L528 536 Z"
+          fill="url(#boltFill)" filter="url(#emeraldGlow)"/>
+    <circle cx="724" cy="622" r="26" fill="#6366F1"/>
+  </g>
+
+  <text x="1024" y="1420" text-anchor="middle"
+        font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="118"
+        letter-spacing="26" fill="#F8FAFC">FLASHCARDZ</text>
+  <text x="1024" y="1500" text-anchor="middle"
+        font-family="Arial, Helvetica, sans-serif" font-weight="600" font-size="42"
+        letter-spacing="14" fill="#10B981">SPACED REPETITION, PERFECTED</text>
+</svg>

@@ -1,22 +1,29 @@
 {
   "expo": {
-    "name": "flashlogic",
-    "slug": "flashlogic",
+    "name": "FlashCardZ",
+    "slug": "flashcardz",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "flashlogic",
-    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "scheme": "flashcardz",
+    "userInterfaceStyle": "dark",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "supportsTablet": true,
+      "bundleIdentifier": "com.flashcardz.app",
+      "infoPlist": {
+        "UIFileSharingEnabled": true,
+        "LSSupportsOpeningDocumentsInPlace": true,
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
+      "package": "com.flashcardz.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#0F172A",
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "monochromeImage": "./assets/adaptive-icon.png"
       },
+      "permissions": ["VIBRATE", "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE"],
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -28,11 +35,18 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "backgroundColor": "#0F172A",
+          "image": "./assets/splash.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#0F172A",
+            "image": "./assets/splash.png"
+          }
         }
-      ]
+      ],
+      "expo-sqlite",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true,
