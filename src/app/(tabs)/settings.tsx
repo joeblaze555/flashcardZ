@@ -29,7 +29,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import appConfig from '../../../app.json';
+import Constants from 'expo-constants';
 import { HAS_ONBOARDED_KEY } from '@/app/onboarding';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import {
@@ -402,7 +402,7 @@ export default function SettingsScreen() {
             <Ionicons name="flash" size={26} color={EMERALD} />
           </View>
           <View style={styles.versionPill}>
-            <Text style={styles.versionText}>v{appConfig.expo.version} (Production Ready)</Text>
+            <Text style={styles.versionText}>v{Constants.expoConfig?.version ?? '1.0.0'} (Production Ready)</Text>
           </View>
           <Text style={styles.copyright}>© 2026 FlashCardZ · MIT License</Text>
           <Text style={styles.copyright}>Offline-first · Private by design</Text>
