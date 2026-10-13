@@ -509,7 +509,7 @@ export default function SettingsScreen() {
             <Ionicons name="flash" size={26} color={EMERALD} />
           </View>
           <View style={styles.versionPill}>
-            <Text style={styles.versionText}>v{Constants.expoConfig?.version ?? '1.0.0'} (Production Ready)</Text>
+            <Text style={styles.versionText}>v{Constants.expoConfig?.version ?? '1.0.1'} (Production Ready)</Text>
           </View>
           <Text style={styles.copyright}>© 2026 FlashCardZ · MIT License</Text>
           <Text style={styles.copyright}>Offline-first · Private by design</Text>

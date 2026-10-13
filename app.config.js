@@ -1,7 +1,7 @@
 export default {
   name: "FlashCardZ",
   slug: "flashcardz",
-  version: "1.0.0",
+  version: "1.0.1",
   orientation: "portrait",
   icon: "./assets/icon.png",
   scheme: "flashcardz",
@@ -9,6 +9,7 @@ export default {
   ios: {
     supportsTablet: true,
     bundleIdentifier: "com.flashcardz.app",
+    buildNumber: "2",
     infoPlist: {
       UIFileSharingEnabled: true,
       LSSupportsOpeningDocumentsInPlace: true,
@@ -17,6 +18,7 @@ export default {
   },
   android: {
     package: "com.flashcardz.flashcardz",
+    versionCode: 2,
     adaptiveIcon: {
       backgroundColor: "#0F172A",
       foregroundImage: "./assets/adaptive-icon.png",
