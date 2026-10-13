@@ -4,17 +4,17 @@
  * Glassmorphic sections over the fixed deep-slate theme. All data flows
  * preserved: JSON export (file + share sheet + on-device copy), JSON/file
  * import with validation, CSV bulk import into a chosen deck, haptics
- * preference, onboarding replay, and confirmed database wipe.
+ * preference, daily goal + reminder prefs, and confirmed database wipe.
  */
 
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -30,7 +30,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import Constants from 'expo-constants';
-import { HAS_ONBOARDED_KEY } from '@/app/onboarding';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import {
   bulkCreateCards,
@@ -42,6 +41,19 @@ import {
 } from '@/db/database';
 import type { DeckWithCounts } from '@/db/schema';
 import { HAPTICS_ENABLED_KEY as HAPTICS_KEY } from '@/lib/haptics';
+import {
+  DEFAULT_DAILY_GOAL,
+  DEFAULT_REMINDER_HOUR,
+  MAX_DAILY_GOAL,
+  MIN_DAILY_GOAL,
+  clampGoal,
+  getDailyGoal,
+  getReminderEnabled,
+  getReminderHour,
+  setDailyGoal,
+  setReminderEnabled,
+  setReminderHour,
+} from '@/lib/daily-goal';
 import { parseBulkInput } from '@/components/BulkImportModal';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -86,18 +98,32 @@ function formatBytes(bytes: number): string {
 export default function SettingsScreen() {
   const db = useSQLiteContext();
   const theme = useTheme();
-  const router = useRouter();
   const [hapticsEnabled, setHapticsEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
   const [dbSize, setDbSize] = useState<string | null>(null);
   const [csvDecks, setCsvDecks] = useState<DeckWithCounts[]>([]);
   const [csvPickerVisible, setCsvPickerVisible] = useState(false);
+  const [dailyGoal, setDailyGoalState] = useState(DEFAULT_DAILY_GOAL);
+  const [reminderEnabled, setReminderEnabledState] = useState(false);
+  const [reminderHour, setReminderHourState] = useState(DEFAULT_REMINDER_HOUR);
+  // Ref mirrors for the steppers so rapid taps can't operate on stale
+  // closures and drop increments (sync update runs before any await).
+  const goalRef = useRef(DEFAULT_DAILY_GOAL);
+  const hourRef = useRef(DEFAULT_REMINDER_HOUR);
 
-  useEffect(() => {
-    (async () => {
-      const v = await AsyncStorage.getItem(HAPTICS_KEY);
-      if (v !== null) setHapticsEnabled(v === '1');
-    })();
+  const loadPrefs = useCallback(async () => {
+    const [h, g, rOn, rHour] = await Promise.all([
+      AsyncStorage.getItem(HAPTICS_KEY),
+      getDailyGoal().catch(() => DEFAULT_DAILY_GOAL),
+      getReminderEnabled().catch(() => false),
+      getReminderHour().catch(() => DEFAULT_REMINDER_HOUR),
+    ]);
+    if (h !== null) setHapticsEnabled(h === '1');
+    goalRef.current = g;
+    hourRef.current = rHour;
+    setDailyGoalState(g);
+    setReminderEnabledState(rOn);
+    setReminderHourState(rHour);
   }, []);
 
   const loadDbSize = useCallback(async () => {
@@ -116,12 +142,35 @@ export default function SettingsScreen() {
   useFocusEffect(
     useCallback(() => {
       void loadDbSize();
-    }, [loadDbSize]),
+      // Prefs can change in the Stats tab (daily goal stepper shares the
+      // same AsyncStorage keys), so re-read on every focus — this also
+      // covers the initial mount.
+      void loadPrefs();
+    }, [loadDbSize, loadPrefs]),
   );
 
   const toggleHaptics = useCallback(async (next: boolean) => {
     setHapticsEnabled(next);
     await AsyncStorage.setItem(HAPTICS_KEY, next ? '1' : '0');
+  }, []);
+
+  const changeGoal = useCallback(async (delta: number) => {
+    const next = clampGoal(goalRef.current + delta);
+    goalRef.current = next;
+    setDailyGoalState(next);
+    await setDailyGoal(next);
+  }, []);
+
+  const toggleReminder = useCallback(async (next: boolean) => {
+    setReminderEnabledState(next);
+    await setReminderEnabled(next);
+  }, []);
+
+  const changeHour = useCallback(async (delta: number) => {
+    const next = Math.min(23, Math.max(0, hourRef.current + delta));
+    hourRef.current = next;
+    setReminderHourState(next);
+    await setReminderHour(next);
   }, []);
 
   const handleExport = useCallback(async () => {
@@ -248,13 +297,6 @@ export default function SettingsScreen() {
     [db, loadDbSize],
   );
 
-  const handleReplayOnboarding = useCallback(() => {
-    void (async () => {
-      await AsyncStorage.setItem(HAS_ONBOARDED_KEY, 'false');
-      router.replace('/onboarding');
-    })();
-  }, [router]);
-
   const handleClearDatabase = useCallback(() => {
     Alert.alert(
       'Erase everything?',
@@ -364,23 +406,88 @@ export default function SettingsScreen() {
               <Text style={styles.sizeText}>{dbSize} used</Text>
             )}
           </View>
+        </View>
+
+        <Text style={styles.section}>STUDY GOALS & REMINDERS</Text>
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <View style={[styles.iconTile, styles.neutralTile]}>
+              <Ionicons name="flag" size={20} color={MUTED} />
+            </View>
+            <View style={styles.btnText}>
+              <Text style={styles.btnTitle}>Daily goal</Text>
+              <Text style={styles.btnSub}>
+                {dailyGoal} reviews/day ({MIN_DAILY_GOAL}–{MAX_DAILY_GOAL})
+              </Text>
+            </View>
+            <View style={styles.stepper}>
+              <Pressable
+                onPress={() => void changeGoal(-5)}
+                disabled={dailyGoal <= MIN_DAILY_GOAL}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Decrease daily goal"
+                style={[styles.stepBtn, { opacity: dailyGoal <= MIN_DAILY_GOAL ? 0.35 : 1 }]}>
+                <Text style={styles.stepText}>−</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => void changeGoal(5)}
+                disabled={dailyGoal >= MAX_DAILY_GOAL}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Increase daily goal"
+                style={[styles.stepBtn, { opacity: dailyGoal >= MAX_DAILY_GOAL ? 0.35 : 1 }]}>
+                <Text style={styles.stepText}>+</Text>
+              </Pressable>
+            </View>
+          </View>
 
           <View style={styles.divider} />
 
-          <Pressable
-            onPress={handleReplayOnboarding}
-            accessibilityRole="button"
-            accessibilityLabel="Replay onboarding tour"
-            style={({ pressed }) => [styles.rowPress, { opacity: pressed ? 0.7 : 1 }]}>
+          <View style={styles.row}>
             <View style={[styles.iconTile, styles.neutralTile]}>
-              <Ionicons name="play" size={20} color={MUTED} />
+              <Ionicons name="notifications" size={20} color={MUTED} />
             </View>
             <View style={styles.btnText}>
-              <Text style={styles.btnTitle}>Replay onboarding</Text>
-              <Text style={styles.btnSub}>See the intro tour again</Text>
+              <Text style={styles.btnTitle}>Daily reminder</Text>
+              <Text style={styles.btnSub}>Nudge on the Decks tab when due</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={MUTED} />
-          </Pressable>
+            <Switch value={reminderEnabled} onValueChange={(v) => void toggleReminder(v)} />
+          </View>
+
+          {reminderEnabled && (
+            <>
+              <View style={styles.divider} />
+              <View style={styles.row}>
+                <View style={styles.btnText}>
+                  <Text style={styles.btnTitle}>Reminder after</Text>
+                  <Text style={styles.btnSub}>
+                    {reminderHour}:00 — banner shows if goal unmet
+                  </Text>
+                </View>
+                <View style={styles.stepper}>
+                  <Pressable
+                    onPress={() => void changeHour(-1)}
+                    disabled={reminderHour <= 0}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Earlier reminder hour"
+                    style={[styles.stepBtn, { opacity: reminderHour <= 0 ? 0.35 : 1 }]}>
+                    <Text style={styles.stepText}>−</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => void changeHour(1)}
+                    disabled={reminderHour >= 23}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Later reminder hour"
+                    style={[styles.stepBtn, { opacity: reminderHour >= 23 ? 0.35 : 1 }]}>
+                    <Text style={styles.stepText}>+</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </>
+          )}
         </View>
 
         <Pressable
@@ -513,8 +620,10 @@ const styles = StyleSheet.create({
   solidSub: { color: '#E9E4FF', fontSize: 13 },
   // Preference rows
   row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two + 2, paddingVertical: Spacing.one },
-  rowPress: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two + 2, paddingVertical: Spacing.one },
   sizeText: { color: EMERALD, fontSize: 14, fontWeight: '800' },
+  stepper: { flexDirection: 'row', gap: Spacing.two },
+  stepBtn: { borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: BORDER, backgroundColor: BG },
+  stepText: { color: INK, fontSize: 18, fontWeight: '800' },
   // Danger zone
   dangerBtn: {
     flexDirection: 'row',

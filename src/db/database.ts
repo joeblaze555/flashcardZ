@@ -128,6 +128,86 @@ export async function deleteDeck(db: SQLiteDatabase, deckId: string): Promise<vo
   });
 }
 
+/**
+ * Rename / re-describe a deck. Content and SRS progress are untouched.
+ */
+export async function updateDeck(
+  db: SQLiteDatabase,
+  deckId: string,
+  input: { title: string; description?: string },
+): Promise<void> {
+  const title = input.title.trim();
+  if (!title) throw new Error('Deck title must not be empty.');
+  const description = (input.description ?? '').trim();
+  const result = await db.runAsync('UPDATE decks SET title = ?, description = ? WHERE id = ?', [
+    title,
+    description,
+    deckId,
+  ]);
+  if (result.changes === 0) throw new Error(`No deck found with id: ${deckId}`);
+}
+
+/**
+ * Duplicate a deck with all its cards. Copied cards start with a fresh
+ * SRS schedule (due now) so the new deck behaves like a new import —
+ * review history is intentionally not carried over.
+ */
+export async function duplicateDeck(
+  db: SQLiteDatabase,
+  deckId: string,
+  now: Date = new Date(),
+): Promise<Deck> {
+  const source = await db.getFirstAsync<Deck>(
+    'SELECT id, title, description, createdAt FROM decks WHERE id = ?',
+    [deckId],
+  );
+  if (!source) throw new Error(`No deck found with id: ${deckId}`);
+
+  const copy: Deck = {
+    id: generateId(),
+    title: `${source.title} (Copy)`,
+    description: source.description,
+    createdAt: toIso(now),
+  };
+  const initial = createInitialSrsState(now);
+  const sourceCards = await db.getAllAsync<Card>(
+    'SELECT id, deckId, front, back, createdAt FROM cards WHERE deckId = ? ORDER BY createdAt ASC',
+    [deckId],
+  );
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      'INSERT INTO decks (id, title, description, createdAt) VALUES (?, ?, ?, ?)',
+      [copy.id, copy.title, copy.description, copy.createdAt],
+    );
+    const cardStmt = await db.prepareAsync(
+      'INSERT INTO cards (id, deckId, front, back, createdAt) VALUES (?, ?, ?, ?, ?)',
+    );
+    const srsStmt = await db.prepareAsync(
+      'INSERT INTO card_srs (cardId, "interval", repetition, easeFactor, dueDate, lastReviewedAt) VALUES (?, ?, ?, ?, ?, ?)',
+    );
+    try {
+      for (const c of sourceCards) {
+        const newId = generateId();
+        await cardStmt.executeAsync([newId, copy.id, c.front, c.back, toIso(now)]);
+        await srsStmt.executeAsync([
+          newId,
+          initial.interval,
+          initial.repetition,
+          initial.easeFactor,
+          initial.dueDate,
+          null,
+        ]);
+      }
+    } finally {
+      await cardStmt.finalizeAsync();
+      await srsStmt.finalizeAsync();
+    }
+  });
+
+  return copy;
+}
+
 // ---------------------------------------------------------------------------
 // Cards
 // ---------------------------------------------------------------------------
@@ -354,6 +434,27 @@ export async function reviewCard(
 // ---------------------------------------------------------------------------
 // Stats / backup
 // ---------------------------------------------------------------------------
+
+/**
+ * Reviews completed "today" (UTC day, same boundary as `getReviewStreak`).
+ * Note: only each card's *latest* review is visible in `card_srs`, so a
+ * card reviewed twice in one day counts once — consistent with the streak.
+ */
+export async function getReviewsTodayCount(
+  db: SQLiteDatabase,
+  now: Date = new Date(),
+): Promise<number> {
+  const todayUTC = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  )
+    .toISOString()
+    .slice(0, 10);
+  const row = await db.getFirstAsync<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM card_srs WHERE DATE(lastReviewedAt) = DATE(?)',
+    [todayUTC],
+  );
+  return row?.count ?? 0;
+}
 
 export async function getStats(db: SQLiteDatabase, now: Date = new Date()): Promise<ReviewStats> {
   const nowIso = now.toISOString();

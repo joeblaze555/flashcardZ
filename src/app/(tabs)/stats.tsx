@@ -1,21 +1,30 @@
 /**
  * Stats tab — learning insights dashboard.
  *
- * KPI cards (totals, due queue, review streak, completed reviews) plus a
+ * KPI cards (totals, due queue, review streak, completed reviews), daily
+ * goal progress (reviews today vs. target with adjustable goal), plus a
  * mastery breakdown bucketing cards by SM-2 interval: Learning (<6d),
  * Reviewing (6–20d), Mastered (≥21d). Reloads on every focus.
  */
 
 import { useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { getMasteryBreakdown, getReviewStreak, getStats } from '@/db/database';
+import { getMasteryBreakdown, getReviewsTodayCount, getReviewStreak, getStats } from '@/db/database';
 import type { MasteryBreakdown, ReviewStats } from '@/db/schema';
 import { useTheme } from '@/hooks/use-theme';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import {
+  DEFAULT_DAILY_GOAL,
+  MAX_DAILY_GOAL,
+  MIN_DAILY_GOAL,
+  clampGoal,
+  getDailyGoal,
+  setDailyGoal,
+} from '@/lib/daily-goal';
 
 const LEARNING_COLOR = '#6366F1';
 const REVIEWING_COLOR = '#F59E0B';
@@ -44,18 +53,31 @@ export default function StatsScreen() {
   const db = useSQLiteContext();
   const theme = useTheme();
   const [data, setData] = useState<Dashboard | null>(null);
+  const [goal, setGoal] = useState(DEFAULT_DAILY_GOAL);
+  const [today, setToday] = useState(0);
+  // Mirror of `goal` for the stepper: the sync portion of `changeGoal`
+  // runs before any await, so rapid taps each see the latest value
+  // instead of a stale closure (which would drop increments).
+  const goalRef = useRef(DEFAULT_DAILY_GOAL);
 
   useFocusEffect(
     useCallback(() => {
       let alive = true;
       (async () => {
         try {
-          const [stats, mastery, streak] = await Promise.all([
+          const [stats, mastery, streak, todayCount, savedGoal] = await Promise.all([
             getStats(db),
             getMasteryBreakdown(db),
             getReviewStreak(db),
+            getReviewsTodayCount(db).catch(() => 0),
+            getDailyGoal().catch(() => DEFAULT_DAILY_GOAL),
           ]);
-          if (alive) setData({ stats, mastery, streak });
+          if (alive) {
+            setData({ stats, mastery, streak });
+            setToday(todayCount);
+            goalRef.current = savedGoal;
+            setGoal(savedGoal);
+          }
         } catch (e) {
           Alert.alert('Database error', e instanceof Error ? e.message : String(e));
         }
@@ -65,6 +87,17 @@ export default function StatsScreen() {
       };
     }, [db]),
   );
+
+  const changeGoal = useCallback(async (delta: number) => {
+    const next = clampGoal(goalRef.current + delta);
+    goalRef.current = next;
+    setGoal(next);
+    try {
+      await setDailyGoal(next);
+    } catch {
+      // Non-fatal: goal stays in memory for this session.
+    }
+  }, []);
 
   const kpis = data
     ? [
@@ -97,6 +130,57 @@ export default function StatsScreen() {
                   <Text style={[styles.label, { color: theme.textSecondary }]}>{kpi.label}</Text>
                 </View>
               ))}
+            </View>
+
+            <Text style={[styles.section, { color: theme.text }]}>Daily goal</Text>
+            <View style={[styles.panel, { backgroundColor: theme.backgroundElement }]}>
+              <View style={styles.goalHeader}>
+                <View style={styles.bucketLabels}>
+                  <Text style={[styles.goalValue, { color: theme.text }]}>
+                    {today} / {goal} reviews
+                  </Text>
+                  <Text style={[styles.bucketHint, { color: theme.textSecondary }]}>
+                    {today >= goal
+                      ? 'Goal hit — nice work!'
+                      : `${goal - today} to go today`}
+                  </Text>
+                </View>
+                <View style={styles.stepper}>
+                  <Pressable
+                    onPress={() => void changeGoal(-5)}
+                    disabled={goal <= MIN_DAILY_GOAL}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Decrease daily goal"
+                    style={[styles.stepBtn, { opacity: goal <= MIN_DAILY_GOAL ? 0.35 : 1 }]}>
+                    <Text style={[styles.stepText, { color: theme.text }]}>−</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => void changeGoal(5)}
+                    disabled={goal >= MAX_DAILY_GOAL}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Increase daily goal"
+                    style={[styles.stepBtn, { opacity: goal >= MAX_DAILY_GOAL ? 0.35 : 1 }]}>
+                    <Text style={[styles.stepText, { color: theme.text }]}>+</Text>
+                  </Pressable>
+                </View>
+              </View>
+              <View style={[styles.track, { backgroundColor: theme.backgroundSelected }]}>
+                <View
+                  style={[
+                    styles.fill,
+                    {
+                      backgroundColor: '#10B981',
+                      width: `${Math.min(100, Math.round((today / Math.max(1, goal)) * 100))}%`,
+                    },
+                  ]}
+                />
+              </View>
+              <Text style={[styles.goalHint, { color: theme.textSecondary }]}>
+                Adjust in steps of 5 ({MIN_DAILY_GOAL}–{MAX_DAILY_GOAL}). Reminder prefs live in
+                Settings.
+              </Text>
             </View>
 
             <Text style={[styles.section, { color: theme.text }]}>Mastery</Text>
@@ -176,5 +260,11 @@ const styles = StyleSheet.create({
   bucketCount: { fontSize: 14, fontWeight: '700' },
   track: { height: 8, borderRadius: 999, overflow: 'hidden' },
   fill: { height: '100%', borderRadius: 999 },
+  goalHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  goalValue: { fontSize: 17, fontWeight: '800' },
+  stepper: { flexDirection: 'row', gap: Spacing.two },
+  stepBtn: { borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: '#334155' },
+  stepText: { fontSize: 18, fontWeight: '800' },
+  goalHint: { fontSize: 12 },
   empty: { fontSize: 13, textAlign: 'center' },
 });
